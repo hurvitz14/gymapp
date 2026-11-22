@@ -8,6 +8,9 @@ A sleek black-and-blue workout tracker inspired by Hevy, with step tracking, mea
 - **Steps** — daily goal ring, weekly chart, quick add
 - **Meals** — calories and macros against goals, quick re-add of recent meals
 - **Progress** — estimated 1RM and volume charts per lift, body-weight chart, record list
+- **Smart meal logging** — type anything ("2 eggs and toast", "שווארמה בלאפה") and get calories and macros per item. Open Food Facts first, an AI estimate (Supabase Edge Function `estimate-food`) as fallback, plus barcode scan
+- **Weekly check-in** — ratings (training feel, energy, sleep, plan), problems/pain, notes and up to 4 progress photos (private storage). Trainees can link to a coach with a code; the coach sees check-ins and replies
+- Plate calculator, progressive-overload suggestions, Hebrew (RTL) UI
 - Kg/lb units, CSV export, offline app shell
 
 ## Run locally
@@ -19,6 +22,9 @@ Add the Pages URL under Supabase **Authentication → URL Configuration → Site
 
 ## Backend (Supabase)
 Project `lift-app` (ref `mjfcomrwtikkiamyowww`). The schema, row-level security and PR triggers are in `supabase/migrations/`. Every table is protected by RLS, so the publishable key in `config.js` is safe to ship.
+
+## AI food estimates (one-time setup)
+In Supabase: **Edge Functions → Secrets → add `ANTHROPIC_API_KEY`**. Without it, packaged foods still work through Open Food Facts; free-text meals show a "not set up yet" message. Each user is capped at 60 estimates per day.
 
 ## Roadmap
 - Background push when the app is closed (needs a VAPID key pair and an edge function that sends Web Push)

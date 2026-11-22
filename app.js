@@ -35,6 +35,7 @@ const ICONS = {
   fuel: '<svg viewBox="0 0 24 24"><path d="M7 3v8a3 3 0 0 0 3 3v7M10 3v6M4 3v6M17 3c-2 2-3 5-3 8h3v10"/></svg>',
   progress: '<svg viewBox="0 0 24 24"><path d="M3 20h18M5 16l4-5 4 3 6-8"/></svg>',
   me: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+  checkin: '<svg viewBox="0 0 24 24"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 14l2 2 4-4"/></svg>',
   bell: '<svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8M10 21a2 2 0 0 0 4 0"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
@@ -148,8 +149,10 @@ function onNotification(n) {
   if (n.type === "pr") {
     toast(`<span class="trophy">🏆</span><div><div class="t1">${esc(n.title)}</div><div class="t2">${esc(n.body || "")}</div></div>`, "pr");
     if (navigator.vibrate) navigator.vibrate([60, 40, 120]);
-    systemNotify(n);
+  } else {
+    toast(`<div class="t1">${esc(n.title)}</div><div class="t2">${esc(n.body || "")}</div>`);
   }
+  systemNotify(n);
   renderTop();
   if (S.tab === "me") render();
 }
@@ -165,7 +168,7 @@ async function systemNotify(n) {
 }
 
 /* ---------- shell ---------- */
-const TABS = [["home", "Home"], ["train", "Train"], ["fuel", "Fuel"], ["progress", "Progress"], ["me", "Me"]];
+const TABS = [["home", "Home"], ["train", "Train"], ["fuel", "Fuel"], ["progress", "Progress"], ["checkin", "Check-in"], ["me", "Me"]];
 
 function renderTop() {
   const unread = S.notifs.filter((n) => !n.read_at).length;
@@ -188,7 +191,7 @@ async function render() {
   v.innerHTML = `<div class="sk"></div><div class="sk"></div>`;
   let html = "";
   try {
-    html = await ({ home: homeView, train: trainView, fuel: fuelView, progress: progressView, me: meView })[S.tab]();
+    html = await ({ home: homeView, train: trainView, fuel: fuelView, progress: progressView, checkin: checkinView, me: meView })[S.tab]();
   } catch (e) { html = `<div class="empty"><b>Couldn't load this screen</b>Check your connection and try again.</div>`; }
   if (token !== S.renderToken) return;
   v.innerHTML = html;
@@ -511,12 +514,19 @@ async function fuelView() {
 }
 
 async function mealSheet(food) {
+  const mode = food ? "manual" : S.mealMode || "smart";
+  const seg = food ? "" : `<div class="seg"><button class="${mode === "smart" ? "on" : ""}" data-act="mealMode" data-m="smart">Smart</button><button class="${mode === "manual" ? "on" : ""}" data-act="mealMode" data-m="manual">Manual</button></div>`;
+  if (mode === "smart") {
+    const hr0 = new Date().getHours(); S.estType = S.estType || (hr0 < 11 ? "breakfast" : hr0 < 15 ? "lunch" : hr0 < 21 ? "dinner" : "snack");
+    openSheet("Log a meal", `${seg}<form id="est-form"><label class="field"><span>What did you eat?</span><textarea name="q" rows="2" maxlength="300" required placeholder="e.g. 2 eggs and toast with avocado"></textarea></label><button class="btn primary block" type="submit">Calculate</button></form><div id="est-out"></div><button class="btn block" data-act="scanBarcode" style="margin-top:14px">Scan barcode</button>`);
+    drawEst(); return;
+  }
   const { data: recent } = await sb.from("meals").select("name,calories,protein_g,carbs_g,fat_g,meal_type").order("created_at", { ascending: false }).limit(40);
   const seen = new Set(), rec = [];
   for (const m of recent || []) { const k = m.name.toLowerCase(); if (!seen.has(k)) { seen.add(k); rec.push(m); } if (rec.length >= 8) break; }
   const hr = new Date().getHours(); const def = hr < 11 ? "breakfast" : hr < 15 ? "lunch" : hr < 21 ? "dinner" : "snack";
   const k = food ? food.grams / 100 : 0, fv = (v) => (food ? (Math.round(v * k * 10) / 10) : "");
-  openSheet("Log a meal", `${food ? "" : `<button class="btn block" data-act="scanBarcode" style="margin-bottom:14px">Scan barcode</button>`}
+  openSheet("Log a meal", `${seg}${food ? "" : `<button class="btn block" data-act="scanBarcode" style="margin-bottom:14px">Scan barcode</button>`}
   ${!food && rec.length ? `<div class="small muted" style="margin-bottom:8px">Quick add</div><div class="row" style="flex-wrap:wrap;gap:6px;margin-bottom:16px">${rec.map((m, i) => `<button class="chip blue" data-act="quickMeal" data-i="${i}">${esc(m.name)} · ${m.calories}</button>`).join("")}</div>` : ""}
   <form id="meal-form"><label class="field"><span>Meal name</span><input type="text" name="name" required placeholder="e.g. Chicken & rice" value="${food ? esc(food.name) : ""}"></label>
   <label class="field"><span>Type</span><select name="meal_type">${["breakfast", "lunch", "dinner", "snack"].map((t) => `<option value="${t}" ${t === def ? "selected" : ""}>${t[0].toUpperCase() + t.slice(1)}</option>`).join("")}</select></label>
@@ -617,7 +627,7 @@ function weightSheet() {
 async function notifsSheet() {
   const list = S.notifs;
   openSheet("Notifications", `${list.length ? `<button class="link small" data-act="markRead" style="margin-bottom:8px">Mark all as read</button>` : ""}
-  ${list.length ? list.map((n) => `<div class="list-item notif-item ${n.read_at ? "" : "unread"}"><div class="icon-bubble">${n.type === "pr" ? "🏆" : "🔔"}</div><div class="grow"><b>${esc(n.title)}</b><div class="muted small">${esc(n.body || "")}</div><div class="muted small">${new Date(n.created_at).toLocaleString(I18N.loc, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div></div></div>`).join("") : `<div class="empty"><b>All quiet</b>Personal records and milestones will show up here.</div>`}`);
+  ${list.length ? list.map((n) => `<div class="list-item notif-item ${n.read_at ? "" : "unread"}"><div class="icon-bubble">${n.type === "pr" ? "🏆" : n.type === "checkin" ? "📋" : n.type === "coach" ? "💬" : "🔔"}</div><div class="grow"><b>${esc(n.title)}</b><div class="muted small">${esc(n.body || "")}</div><div class="muted small">${new Date(n.created_at).toLocaleString(I18N.loc, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</div></div></div>`).join("") : `<div class="empty"><b>All quiet</b>Personal records and milestones will show up here.</div>`}`);
 }
 function routineSheet() {
   openSheet("New routine", `<form id="routine-form"><label class="field"><span>Name</span><input type="text" name="name" required placeholder="e.g. Push day"></label>
@@ -629,6 +639,141 @@ function customExerciseSheet(back) {
   <div class="two"><label class="field"><span>Muscle group</span><select name="muscle_group">${["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Calves", "Core", "Cardio", "Traps"].map((g) => `<option>${g}</option>`).join("")}</select></label>
   <label class="field"><span>Equipment</span><select name="equipment">${["barbell", "dumbbell", "machine", "cable", "bodyweight", "other"].map((g) => `<option>${g}</option>`).join("")}</select></label></div>
   <button class="btn primary block" type="submit">Create</button></form>`);
+}
+
+/* ---------- food estimate: Open Food Facts first, Claude (edge function) as fallback ---------- */
+const tokens = (s) => String(s).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length >= 2);
+const isSimpleFood = (q) => q.trim().split(/\s+/).length <= 3 && !/[\d,;+]/.test(q) && !/\b(and|with)\b/i.test(q) && !/(^|\s)(ו\S|עם)/.test(q);
+const scaleFood = (p, g) => ({ quantity: `${g} g`, calories: Math.round(p.kcal * g / 100), protein_g: Math.round(p.p * g / 10) / 10, carbs_g: Math.round(p.c * g / 10) / 10, fat_g: Math.round(p.f * g / 10) / 10 });
+async function offSearch(q) {
+  try {
+    const r = await fetch(`https://world.openfoodfacts.org/cgi/search.pl?search_terms=${encodeURIComponent(q)}&search_simple=1&action=process&json=1&page_size=6&fields=product_name,nutriments,serving_quantity`);
+    const j = await r.json(), qt = tokens(q);
+    if (!qt.length) return null;
+    for (const p of j.products || []) {
+      const n = p.nutriments || {};
+      const kcal = n["energy-kcal_100g"] ?? (n["energy_100g"] ? n["energy_100g"] / 4.184 : null);
+      if (!p.product_name || kcal == null || n.proteins_100g == null || n.carbohydrates_100g == null || n.fat_100g == null) continue;
+      const pt = tokens(p.product_name), hit = qt.filter((w) => pt.includes(w)).length / qt.length;
+      if (hit >= 0.99 || (qt.length > 1 && hit >= 0.67)) {
+        const per100 = { kcal: +kcal, p: +n.proteins_100g, c: +n.carbohydrates_100g, f: +n.fat_100g }, g = Math.round(+p.serving_quantity) || 100;
+        return { source: "off", items: [{ name: p.product_name, per100, grams: g, ...scaleFood(per100, g) }] };
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+async function estimateFood(q) {
+  if (isSimpleFood(q)) { const off = await offSearch(q); if (off) return off; }
+  const { data, error } = await sb.functions.invoke("estimate-food", { body: { query: q } });
+  if (error) {
+    const st = error.context && error.context.status;
+    throw new Error(st === 503 ? "Calculation isn't set up yet — the app owner needs to add the AI key." : st === 429 ? "Daily calculation limit reached. Try again tomorrow or enter manually." : "Couldn't calculate right now. Try again or enter manually.");
+  }
+  if (!data || !data.items || !data.items.length) throw new Error("Couldn't find any food in that text.");
+  return { source: "claude", items: data.items };
+}
+function drawEst() {
+  const out = $("#est-out"); if (!out) return;
+  const e = S.est;
+  if (!e) { out.innerHTML = ""; return; }
+  if (e.loading) { out.innerHTML = `<div class="muted small" style="margin-top:14px">Calculating…</div>`; return; }
+  if (e.error) { out.innerHTML = `<div class="msg err" style="margin-top:14px">${esc(e.error)}</div>`; return; }
+  const it = e.items, sum = (k) => it.reduce((a, x) => a + (+x[k] || 0), 0);
+  out.innerHTML = `<div class="card" style="margin:14px 0 0">${it.map((x, i) => `<div class="list-item"><div class="grow"><b dir="auto">${esc(x.name)}</b><div class="muted small"><span dir="auto">${esc(x.quantity || "")}</span></div><div class="muted small num">P ${Math.round(x.protein_g)} · C ${Math.round(x.carbs_g)} · F ${Math.round(x.fat_g)}</div></div>${x.per100 ? `<input type="number" class="est-g" data-i="${i}" value="${x.grams}" min="1" style="width:78px;padding:8px;text-align:center" aria-label="Amount (g)">` : ""}<div class="num" style="font-weight:800">${x.calories}</div><button class="icon-btn" data-act="estRemove" data-i="${i}" aria-label="Remove">${ICONS.x}</button></div>`).join("")}
+    <div class="row between" style="padding-top:12px"><b>Total</b><span class="num"><b>${Math.round(sum("calories"))}</b> kcal · P ${Math.round(sum("protein_g"))} · C ${Math.round(sum("carbs_g"))} · F ${Math.round(sum("fat_g"))}</span></div></div>
+    <div class="muted small" style="margin:8px 2px 12px">${e.source === "off" ? "Source: Open Food Facts." : "Estimated by AI — real values may vary."}</div>
+    <label class="field"><span>Type</span><select id="est-type">${["breakfast", "lunch", "dinner", "snack"].map((t) => `<option value="${t}" ${t === S.estType ? "selected" : ""}>${t[0].toUpperCase() + t.slice(1)}</option>`).join("")}</select></label>
+    <div class="two"><button class="btn primary" data-act="estAdd">Add to log</button><button class="btn" data-act="closeSheet">Close</button></div>`;
+}
+
+/* ---------- CHECK-IN ---------- */
+const weekStartYmd = () => { const d = new Date(); d.setDate(d.getDate() - d.getDay()); return ymd(d); };
+const RATE = [["feel", "How did training feel?"], ["energy", "Energy"], ["sleep", "Sleep"], ["adherence", "Stuck to the plan?"]];
+const PHOTOS = () => sb.storage.from("checkin-photos");
+async function signedUrls(paths) {
+  if (!paths || !paths.length) return {};
+  const { data } = await PHOTOS().createSignedUrls(paths, 3600);
+  return Object.fromEntries((data || []).map((x) => [x.path, x.signedUrl]));
+}
+async function compressImage(file, max = 1280, q = 0.8) {
+  const bmp = await createImageBitmap(file);
+  const s = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const c = document.createElement("canvas"); c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s);
+  c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise((res) => c.toBlob(res, "image/jpeg", q));
+}
+function ciPhotosHtml() {
+  const c = S.ci;
+  const tiles = [
+    ...c.paths.map((p, i) => `<div class="ph"><img src="${esc(c.urls[p] || "")}" alt=""><button type="button" data-act="rmOldPhoto" data-i="${i}" aria-label="Remove">×</button></div>`),
+    ...c.newPhotos.map((n, i) => `<div class="ph"><img src="${n.url}" alt=""><button type="button" data-act="rmNewPhoto" data-i="${i}" aria-label="Remove">×</button></div>`),
+  ];
+  if (c.paths.length + c.newPhotos.length < 4) tiles.push(`<button type="button" class="ph add" data-act="addPhotos">+<span>Add photo</span></button>`);
+  return tiles.join("");
+}
+const ratingLine = (c) => [["Feel", c.feel], ["Energy", c.energy], ["Sleep", c.sleep], ["Plan", c.adherence]].filter(([, v]) => v).map(([l, v]) => `${l} ${v}`).join(" · ");
+
+async function checkinView() {
+  const p = S.profile, wk = weekStartYmd(), isCoach = p.role === "coach";
+  const tab = isCoach ? S.ciTab || "mine" : "mine";
+  const head = `<h1 class="page-title" style="margin:6px 0 16px">Check-in</h1>${isCoach ? `<div class="seg"><button class="${tab === "mine" ? "on" : ""}" data-act="ciTab" data-k="mine">My check-in</button><button class="${tab === "trainees" ? "on" : ""}" data-act="ciTab" data-k="trainees">Trainees</button></div>` : ""}`;
+  if (tab === "trainees") return head + (await traineesView());
+  const [cur, past, link] = await Promise.all([
+    sb.from("check_ins").select("*").eq("user_id", S.user.id).eq("week_start", wk).maybeSingle(),
+    sb.from("check_ins").select("id,week_start,feel,energy,sleep,adherence,photo_paths,check_in_replies(id)").eq("user_id", S.user.id).neq("week_start", wk).order("week_start", { ascending: false }).limit(20),
+    sb.from("coach_links").select("coach_id,coach:profiles!coach_id(display_name)").eq("trainee_id", S.user.id),
+  ]);
+  const row = cur.data;
+  if (!S.ci || S.ci.week !== wk || !S.ci.dirty) {
+    S.ci = { week: wk, dirty: false, vals: { feel: row?.feel ?? null, energy: row?.energy ?? null, sleep: row?.sleep ?? null, adherence: row?.adherence ?? null }, problems: row?.problems || "", notes: row?.notes || "", paths: [...(row?.photo_paths || [])], removed: [], newPhotos: [], urls: {} };
+  }
+  S.ci.urls = await signedUrls(S.ci.paths);
+  const lk = (link.data || [])[0];
+  return head + `<div class="card" id="ci-card"><h3>Week of ${fmtDate(wk)}${row ? ` <span class="chip blue">Submitted</span>` : ""}</h3>
+    <div class="muted small" style="margin:-4px 0 14px">1 is low, 5 is great.</div>
+    ${RATE.map(([k, l]) => `<div class="field"><span>${l}</span><div class="rate" data-k="${k}">${[1, 2, 3, 4, 5].map((v) => `<button type="button" class="${S.ci.vals[k] === v ? "on" : ""}" data-act="rate" data-k="${k}" data-v="${v}">${v}</button>`).join("")}</div></div>`).join("")}
+    <label class="field"><span>Problems or pain</span><textarea name="problems" rows="3" maxlength="2000" placeholder="Anything bothering you? Injuries, soreness, missed sessions…">${esc(S.ci.problems)}</textarea></label>
+    <label class="field"><span>Notes for your coach</span><textarea name="notes" rows="3" maxlength="2000" placeholder="Anything else you want to share this week">${esc(S.ci.notes)}</textarea></label>
+    <div class="field"><span>Progress photos</span><div id="ci-photos">${ciPhotosHtml()}</div><input type="file" id="ci-file" accept="image/*" multiple hidden>
+      <div class="muted small" style="margin-top:8px">Photos are visible only to you and your linked coach.</div></div>
+    <button class="btn primary block" data-act="ciSubmit">${row ? "Update check-in" : "Submit check-in"}</button></div>
+  <div class="card"><h3>Your coach</h3>${lk ? `<div class="row between"><div class="grow"><b>${esc(lk.coach?.display_name || "Coach")}</b><div class="muted small">Sees your weekly check-ins and photos.</div></div><button class="btn sm danger" data-act="unlinkCoach" data-id="${lk.coach_id}">Unlink</button></div>` : `<form id="link-form" class="row" style="gap:8px"><input type="text" name="code" placeholder="Coach code" maxlength="8" style="text-transform:uppercase" required><button class="btn primary sm" type="submit">Link</button></form><div class="muted small" style="margin-top:8px">Got a code from your coach? Enter it to share your check-ins with them.</div>`}
+    ${isCoach ? "" : `<div class="divider"></div><button class="btn ghost block" data-act="becomeCoach">I'm a coach</button>`}</div>
+  <div class="card"><h3>Past check-ins</h3>${(past.data || []).length ? past.data.map((c) => `<div class="list-item" data-act="openCheckin" data-id="${c.id}" style="cursor:pointer"><div class="grow"><b>Week of ${fmtDate(c.week_start)}</b><div class="muted small">${[ratingLine(c), c.photo_paths.length ? `${c.photo_paths.length} photo${c.photo_paths.length > 1 ? "s" : ""}` : "", (c.check_in_replies || []).length ? `${c.check_in_replies.length} repl${c.check_in_replies.length > 1 ? "ies" : "y"}` : ""].filter(Boolean).join(" · ")}</div></div><span class="muted">›</span></div>`).join("") : `<div class="empty small"><b>No past check-ins yet</b>Your first one will show up here.</div>`}</div>`;
+}
+
+async function traineesView() {
+  const [links, cis] = await Promise.all([
+    sb.from("coach_links").select("trainee_id,trainee:profiles!trainee_id(display_name)").eq("coach_id", S.user.id),
+    sb.from("check_ins").select("id,user_id,week_start,feel,energy,sleep,adherence,photo_paths,check_in_replies(id)").neq("user_id", S.user.id).order("week_start", { ascending: false }).limit(200),
+  ]);
+  S.coachData = { cis: cis.data || [], names: Object.fromEntries((links.data || []).map((l) => [l.trainee_id, l.trainee?.display_name || "Trainee"])) };
+  const list = links.data || [];
+  return `<div class="card"><h3>Your coach code</h3><div class="row between"><b class="num" style="font-size:26px;letter-spacing:.14em">${esc(S.profile.coach_code || "")}</b><button class="btn sm" data-act="copyCode">Copy</button></div>
+    <div class="muted small" style="margin-top:8px">Share this code with your trainees. They enter it in their Check-in tab.</div></div>
+  <div class="card"><h3>Trainees</h3>${list.length ? list.map((l) => {
+    const mine = S.coachData.cis.filter((c) => c.user_id === l.trainee_id), last = mine[0];
+    return `<div class="list-item" data-act="openTrainee" data-id="${l.trainee_id}" style="cursor:pointer"><div class="icon-bubble">${esc((l.trainee?.display_name || "?")[0].toUpperCase())}</div><div class="grow"><b>${esc(l.trainee?.display_name || "Trainee")}</b><div class="muted small">${last ? `Week of ${fmtDate(last.week_start)}` : "No check-ins yet"}</div></div>${last && !(last.check_in_replies || []).length ? `<span class="chip blue">Needs reply</span>` : last ? `<span class="chip">Replied</span>` : ""}</div>`;
+  }).join("") : `<div class="empty small"><b>No trainees yet</b>Trainees who link to you will appear here.</div>`}</div>`;
+}
+
+function traineeSheet(id) {
+  const name = S.coachData.names[id] || "Trainee", mine = S.coachData.cis.filter((c) => c.user_id === id);
+  openSheet(name, mine.length ? mine.map((c) => `<div class="list-item" data-act="openCheckin" data-id="${c.id}" data-coach="1" style="cursor:pointer"><div class="grow"><b>Week of ${fmtDate(c.week_start)}</b><div class="muted small">${[ratingLine(c), c.photo_paths.length ? `${c.photo_paths.length} photo${c.photo_paths.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ")}</div></div>${!(c.check_in_replies || []).length ? `<span class="chip blue">Needs reply</span>` : ""}<span class="muted">›</span></div>`).join("") : `<div class="empty small"><b>No check-ins yet</b></div>`);
+}
+
+async function checkinDetail(id, asCoach) {
+  const { data: c } = await sb.from("check_ins").select("*, check_in_replies(id,body,created_at,coach_id)").eq("id", id).single();
+  if (!c) return;
+  const urls = await signedUrls(c.photo_paths), replies = (c.check_in_replies || []).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  openSheet(`Week of ${fmtDate(c.week_start)}`, `<div class="grid2" style="margin-bottom:12px">${RATE.map(([k, l]) => `<div class="card"><h3>${l}</h3><div class="big num">${c[k] ?? "—"}<span class="muted" style="font-size:14px"> / 5</span></div></div>`).join("")}</div>
+    ${c.weight_kg ? `<div class="muted small" style="margin-bottom:12px">Weight: ${wtxt(c.weight_kg)}</div>` : ""}
+    ${c.problems ? `<div class="card"><h3>Problems or pain</h3><div style="white-space:pre-wrap">${esc(c.problems)}</div></div>` : ""}
+    ${c.notes ? `<div class="card"><h3>Notes for your coach</h3><div style="white-space:pre-wrap">${esc(c.notes)}</div></div>` : ""}
+    ${c.photo_paths.length ? `<div class="photos">${c.photo_paths.map((p) => `<a href="${esc(urls[p] || "#")}" target="_blank" rel="noopener"><img src="${esc(urls[p] || "")}" alt=""></a>`).join("")}</div>` : ""}
+    ${replies.map((r) => `<div class="card"><h3>Coach<span style="text-transform:none;letter-spacing:0">${new Date(r.created_at).toLocaleDateString(I18N.loc, { month: "short", day: "numeric" })}</span></h3><div style="white-space:pre-wrap">${esc(r.body)}</div></div>`).join("")}
+    ${asCoach ? `<form id="reply-form" data-id="${c.id}"><textarea name="body" rows="3" maxlength="2000" required placeholder="Write a reply…"></textarea><button class="btn primary block" type="submit" style="margin-top:8px">Send reply</button></form>` : ""}`);
 }
 
 /* ---------- actions ---------- */
@@ -706,7 +851,53 @@ const A = {
     S.active = null; localStorage.removeItem("lift.active"); clearInterval(S.tick); stopRest(); render();
   },
   mealDay: (el) => { const d = addDays(S.mealDate, Number(el.dataset.n)); if (d > today()) return; S.mealDate = d; render(); },
-  addMeal: () => { S.food = null; mealSheet(); },
+  addMeal: () => { S.food = null; S.est = null; mealSheet(); },
+  mealMode: (el) => { S.mealMode = el.dataset.m; S.est = null; mealSheet(); },
+  estRemove: (el) => { S.est.items.splice(+el.dataset.i, 1); if (!S.est.items.length) S.est = null; drawEst(); },
+  estAdd: async () => {
+    const type = $("#est-type").value; S.estType = type;
+    const rows = S.est.items.map((x) => ({ user_id: S.user.id, logged_on: S.mealDate, meal_type: type, name: (x.quantity ? `${x.name} (${x.quantity})` : x.name).slice(0, 120), calories: Math.round(x.calories) || 0, protein_g: x.protein_g || 0, carbs_g: x.carbs_g || 0, fat_g: x.fat_g || 0 }));
+    if (!rows.length) return;
+    await must(sb.from("meals").insert(rows));
+    S.est = null; closeSheet(); toastMsg("Added to log"); render();
+  },
+  ciTab: (el) => { S.ciTab = el.dataset.k; render(); },
+  rate: (el) => {
+    const k = el.dataset.k, v = +el.dataset.v;
+    S.ci.vals[k] = S.ci.vals[k] === v ? null : v; S.ci.dirty = true;
+    $$(`.rate[data-k="${k}"] button`).forEach((b) => b.classList.toggle("on", +b.dataset.v === S.ci.vals[k]));
+  },
+  addPhotos: () => $("#ci-file").click(),
+  rmOldPhoto: (el) => { const p = S.ci.paths.splice(+el.dataset.i, 1)[0]; S.ci.removed.push(p); S.ci.dirty = true; $("#ci-photos").innerHTML = ciPhotosHtml(); },
+  rmNewPhoto: (el) => { const n = S.ci.newPhotos.splice(+el.dataset.i, 1)[0]; URL.revokeObjectURL(n.url); $("#ci-photos").innerHTML = ciPhotosHtml(); },
+  ciSubmit: async (el) => {
+    const c = S.ci; el.disabled = true;
+    try {
+      const { data: bw } = await sb.from("body_weights").select("weight_kg").order("logged_on", { ascending: false }).limit(1);
+      const row = await must(sb.from("check_ins").upsert({ user_id: S.user.id, week_start: c.week, feel: c.vals.feel, energy: c.vals.energy, sleep: c.vals.sleep, adherence: c.vals.adherence, problems: c.problems.trim() || null, notes: c.notes.trim() || null, weight_kg: bw && bw[0] ? bw[0].weight_kg : null, photo_paths: c.paths, updated_at: new Date().toISOString() }, { onConflict: "user_id,week_start" }).select().single());
+      const added = [];
+      for (const n of c.newPhotos) {
+        const path = `${S.user.id}/${c.week}/${crypto.randomUUID()}.jpg`;
+        const { error } = await PHOTOS().upload(path, n.blob, { contentType: "image/jpeg" });
+        if (error) { toastMsg("Photo upload failed"); throw error; }
+        added.push(path);
+      }
+      if (added.length) await must(sb.from("check_ins").update({ photo_paths: [...c.paths, ...added] }).eq("id", row.id));
+      if (c.removed.length) await PHOTOS().remove(c.removed);
+      c.newPhotos.forEach((n) => URL.revokeObjectURL(n.url));
+      S.ci = null; toastMsg("Check-in saved"); render();
+    } catch (e) { el.disabled = false; }
+  },
+  openCheckin: (el) => checkinDetail(el.dataset.id, !!el.dataset.coach),
+  openTrainee: (el) => traineeSheet(el.dataset.id),
+  unlinkCoach: async (el) => { if (!ask("Unlink from your coach? They will no longer see your check-ins.")) return; await must(sb.from("coach_links").delete().eq("coach_id", el.dataset.id).eq("trainee_id", S.user.id)); render(); },
+  becomeCoach: async () => {
+    const { error } = await sb.rpc("become_coach");
+    if (error) return toastMsg(error.message);
+    S.profile = await must(sb.from("profiles").select("*").eq("id", S.user.id).single());
+    S.ciTab = "trainees"; render();
+  },
+  copyCode: async () => { try { await navigator.clipboard.writeText(S.profile.coach_code); toastMsg("Copied"); } catch (_) {} },
   scanBarcode: barcodeSheet,
   plates: (el) => {
     let w = null;
@@ -750,6 +941,18 @@ document.addEventListener("change", async (ev) => {
     return;
   }
   if (t.id === "lang-select") { I18N.setLang(t.value); return; }
+  if (t.id === "est-type") { S.estType = t.value; return; }
+  if (t.classList && t.classList.contains("est-g") && S.est) {
+    const it = S.est.items[+t.dataset.i], g = Math.max(1, parseFloat(t.value) || 1);
+    it.grams = g; Object.assign(it, scaleFood(it.per100, g)); drawEst(); return;
+  }
+  if (t.id === "ci-file" && S.ci) {
+    const room = 4 - S.ci.paths.length - S.ci.newPhotos.length;
+    for (const f of [...t.files].slice(0, Math.max(0, room))) {
+      try { const blob = await compressImage(f); S.ci.newPhotos.push({ blob, url: URL.createObjectURL(blob) }); } catch (_) { toastMsg("Couldn't read that photo"); }
+    }
+    S.ci.dirty = true; $("#ci-photos").innerHTML = ciPhotosHtml(); t.value = ""; return;
+  }
   if (t.id === "prog-ex") { S.progressEx = t.value; drawProgress(); }
   if (t.id === "wk-name" && S.active) { S.active.name = t.value.trim() || "Workout"; await sb.from("workouts").update({ name: S.active.name }).eq("id", S.active.id); }
   if (t.id === "push-toggle") {
@@ -762,6 +965,7 @@ document.addEventListener("change", async (ev) => {
 document.addEventListener("input", (ev) => {
   if (ev.target.closest && ev.target.closest("#plate-form")) drawPlates();
   if (ev.target.name === "grams") recalcFood();
+  if (S.ci && ev.target.closest && ev.target.closest("#ci-card") && (ev.target.name === "problems" || ev.target.name === "notes")) { S.ci[ev.target.name] = ev.target.value; S.ci.dirty = true; }
 });
 
 document.addEventListener("submit", async (ev) => {
@@ -779,6 +983,22 @@ document.addEventListener("submit", async (ev) => {
       const { data, error } = await sb.auth.signInWithPassword({ email: fd.email, password: fd.password });
       if (error) return renderAuth("in", error.message);
       return boot(data.user);
+    }
+    if (f.id === "est-form") {
+      const q = fd.q.trim(); if (q.length < 2) return;
+      S.est = { loading: true }; drawEst();
+      try { S.est = await estimateFood(q); } catch (e) { S.est = { error: e.message }; }
+      return drawEst();
+    }
+    if (f.id === "link-form") {
+      const { data, error } = await sb.rpc("link_to_coach", { code: fd.code });
+      if (error) return toastMsg(error.message);
+      toastMsg("Linked to " + data); return render();
+    }
+    if (f.id === "reply-form") {
+      const body = fd.body.trim(); if (!body) return;
+      await must(sb.from("check_in_replies").insert({ check_in_id: f.dataset.id, coach_id: S.user.id, body }));
+      toastMsg("Reply sent"); return checkinDetail(f.dataset.id, true);
     }
     if (f.id === "barcode-form") return lookupBarcode(fd.code.trim());
     if (f.id === "meal-form") {
